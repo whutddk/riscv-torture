@@ -20,8 +20,8 @@ extra_files =
 #--------------------------------------------------------------------
 
 RISCV_GCC = riscv64-unknown-elf-gcc
-RISCV_GCC_OPTS = -nostdlib -nostartfiles -Wa,-march=RVIMAFDXhwacha
-RISCV_OBJDUMP = riscv64-unknown-elf-objdump --disassemble-all --section=.text --section=.data --section=.bss
+RISCV_GCC_OPTS = -nostdlib -nostartfiles -Wa,-march=rv64g
+RISCV_OBJDUMP = riscv64-unknown-elf-objdump --disassemble-all --section=.text --section=.text.startup --section=.text.init --section=.data --section=.bss
 RISCV_SIM = spike --extension=hwacha
 
 #------------------------------------------------------------
@@ -29,17 +29,16 @@ RISCV_SIM = spike --extension=hwacha
 
 asm_tests_bin  = $(patsubst %.S, %, $(asm_tests))
 asm_tests_dump = $(addsuffix .dump, $(asm_tests_bin))
-asm_tests_sig  = $(addsuffix .sig,  $(asm_tests_bin))
-asm_tests_hex  = $(addsuffix .hex,  $(asm_tests_bin))
+
 
 $(asm_tests_dump): %.dump: %
 	$(RISCV_OBJDUMP) $< > $@
+	riscv64-unknown-elf-objcopy -O verilog $< $<.verilog
+	sed -i 's/@800/@000/g' $<.verilog
 
 $(asm_tests_bin): %: %.S $(extra_files)
 	$(RISCV_GCC) $(RISCV_GCC_OPTS) -I../env/p -T../env/p/link.ld $< -o $@
 
-$(asm_tests_hex): %.hex: % $(extra_files)
-	elf2hex 16 16384 $< > $@
 
 $(asm_tests_sig): %.sig: %
 	$(RISCV_SIM) +signature=$@ $<
@@ -47,16 +46,14 @@ $(asm_tests_sig): %.sig: %
 new:
 	cd ..; make gen
 
-run: $(asm_tests_sig)
-	echo; perl -ne 'print "  [$$1] $$ARGV \t$$2\n" if /\*{3}(.{8})\*{3}(.*)/' \
-	       $(asm_tests_sig); echo;
 
-junk += $(asm_tests_bin) $(asm_tests_dump) $(asm_tests_sig) $(asm_tests_hex)
+
+junk += $(asm_tests_bin) $(asm_tests_dump)
 
 #------------------------------------------------------------
 # Default
 
-all: $(asm_tests_dump) $(asm_tests_hex)
+all: $(asm_tests_dump)
 
 #------------------------------------------------------------
 # Clean up

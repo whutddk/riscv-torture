@@ -32,7 +32,7 @@ case class Options(var timeToRun: Int = Overnight.DefTime,
 object Overnight extends App
 {
   def DefTime = 1
-  def DefEmail = "your@email.address"
+  def DefEmail = "295054118@whut.edu.cn"
   def DefThresh = 1
   def DefCSim = ""
   def DefRtlSim = ""

@@ -44,7 +44,9 @@ object TestRunner extends App
       case Some(options) =>
       {
         opts = options;
-        testrun(opts.testAsmName, opts.cSimPath, opts.rtlSimPath, opts.seekOutFailure, opts.output, opts.dumpWaveform, opts.confFileName)
+        val res = testrun(opts.testAsmName, opts.cSimPath, opts.rtlSimPath, opts.seekOutFailure, opts.output, opts.dumpWaveform, opts.confFileName)
+        println(res)
+        res
       }
       case None =>
         System.exit(1) // error message printed by parser
@@ -61,7 +63,7 @@ object TestRunner extends App
               doSeek:       Boolean,
               output:       Boolean,
               dumpWaveform: Boolean,
-              confFileName: String): (Boolean, Option[Seq[String]]) =
+              confFileName: String): Boolean =
   {
 
     val config = new Properties()
@@ -77,66 +79,51 @@ object TestRunner extends App
 
     // Figure out which binary file to test
     val finalBinName = testAsmName match {
-      case Some(asmName) => compileAsmToBin(asmName)
+      case Some(asmName) => {
+        val res = compileAsmToBin(asmName)
+        dumpFromBin(asmName.dropRight(2))
+        copyFromBin(asmName.dropRight(2))
+        res
+      }
       case None => {
         val gen = generator.Generator
         val newAsmName = gen.generate(confFileName, "test")
-        compileAsmToBin(newAsmName)
+        val res = compileAsmToBin(newAsmName)
+        dumpFromBin(newAsmName.dropRight(2))
+        copyFromBin(newAsmName.dropRight(2))
+        res
       }
     }
 
-    // Add the simulators that should be tested
-    val simulators = new ArrayBuffer[(String, (String, Boolean, Boolean, Boolean) => String)]
-    simulators += (("spike",runIsaSim _ ))
-    cSimPath match {
-      case Some(p) => simulators += (("csim",runCSim(p) _ ))
-      case None =>
-    }
-    rtlSimPath match {
-      case Some(p) => simulators += (("rtlsim",runRtlSim(p) _ ))
-      case None =>
-    }
+    // println(finalBinName.get)
 
     // Test the simulators on the complete binary
     finalBinName match {
+
+
       case Some(binName) => {
-      val res = runSimulators(binName, simulators, false, output, dumpWaveform || dump)
-        val fail_names = res.filter(_._3 == Failed).map(_._1.toString)
-        val mism_names = res.filter(_._3 == Mismatched).map(_._1.toString)
-        val bad_sims  = res.filter(_._3 != Matched).map(_._2)
-        if (bad_sims.length > 0) {
-          println("///////////////////////////////////////////////////////")
-          println("//  Simulation failed for " + binName + ":")
-          fail_names.foreach(n => println("\t"+n))
-          println("//  Mismatched sigs for " + binName + ":")
-          mism_names.foreach(n => println("\t"+n))
-          println("//  Rerunning in Debug mode")
-          // run debug for failed/mismatched
-          val resDebug = runSimulators(binName, simulators, true, output, dumpWaveform || dump)
-          println("///////////////////////////////////////////////////////")
-          if(doSeek || seek) {
-            val failName = seekOutFailureBinary(binName, bad_sims, true, output, dumpWaveform || dump)
-            println("///////////////////////////////////////////////////////")
-            println("//  Failing pseg identified. Binary at " + failName)
-            println("///////////////////////////////////////////////////////")
-            dumpFromBin(failName)
-            (true, Some(failName.split("/")))
-          } else {
-            dumpFromBin(binName)
-            (true, Some(binName.split("/")))
-          }
+        // println("Starting Diff test\n")
+        // val pd = Process("/home/whutddk/work/Rift2Core/tb/build/VSimTop -w -d -l -f " + binName)
+        // val res = pd.!!
+        // println(res)
+
+
+        val res = dromajoDiffTest(binName)
+
+        if (res == Matched) {
+          println("Pass!!!")
+          false
         } else {
-          println("///////////////////////////////////////////////////////")
-          println("//  All signatures match for " + binName)
-          println("///////////////////////////////////////////////////////")
-          (false, Some(binName.split("/")))
+          println("Failed")          
+          true
         }
       }
       case None => {
         println("Error: ASM file could not be compiled or generated.")
-        (false, None)
+        false
       }
     }
+    // (false, None)
   }
 
   def compileAsmToBin(asmFileName: String): Option[String] = {
@@ -162,13 +149,25 @@ object TestRunner extends App
 
   def dumpFromBin(binFileName: String): Option[String] = {
     val dumpFileName = binFileName + ".dump"
-    val pd = Process("riscv64-unknown-elf-objdump --disassemble-all --section=.text --section=.data --section=.bss " + binFileName)
+    val pd = Process("riscv64-unknown-elf-objdump --disassemble-all --section=.text --section=.text.startup --section=.text.init --section=.data --section=.bss--disassemble-all --section=.text --section=.text.startup --section=.text.init --section=.data --section=.bss " + binFileName)
     val dump = pd.!!
     val fw = new FileWriter(dumpFileName)
     fw.write(dump)
     fw.close()
     Some(dumpFileName)
   }
+
+  def copyFromBin(binFileName: String): Option[String] = {
+    val copyFileName = binFileName + ".verilog"
+    val pd1 = Process("riscv64-unknown-elf-objcopy -O verilog " + binFileName + " " + binFileName + ".verilog")
+    pd1.!!
+
+    val pd2 = Process("sed -i s/@800/@000/g "+ binFileName +".verilog")
+    pd2.!!
+
+    Some(copyFileName)
+  }
+
   def generateHexFromBin(binFileName: String) = {
     import java.io.File
     // Determine binary size
@@ -248,6 +247,27 @@ object TestRunner extends App
       (name, (name, sim), res)
     } }
   }
+
+  def dromajoDiffTest(verilogFileName: String): Result = {
+    try {
+      val pd = Process("/home/whutddk/work/Rift2Core/tb/build/VSimTop -w -d -l -f " + verilogFileName)
+      val res = pd.!!
+      println(res)
+      if ( res == 0 ) Matched 
+      else {
+        println("Diff Failed!")
+        Mismatched
+      }
+    } catch {
+
+      case e:RuntimeException => {
+        println("Assertion Failed!")
+        Failed
+      }
+    }          
+  }
+
+
 
   def seekOutFailureBinary(bin: String, simulators: Seq[(String, (String, Boolean, Boolean, Boolean) => String)], debug: Boolean, output: Boolean, dumpWaveform: Boolean): String =
   {
