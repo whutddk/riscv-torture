@@ -250,7 +250,7 @@ object TestRunner extends App
 
   def dromajoDiffTest(verilogFileName: String): Result = {
     try {
-      val pd = Process("/home/whutddk/work/Rift2Core/tb/build/VSimTop -w -d -l -f " + verilogFileName)
+      val pd = Process("/home/whutddk/work/Rift2Core/tb/build/VSimTop -d -l -f " + verilogFileName)
       val res = pd.!
       println(res)
       if ( res == 0 ) Matched 
